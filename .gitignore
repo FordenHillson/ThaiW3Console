@@ -1,0 +1,16 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+cache/
+*.log
+dist/
+build/
+export/
+.DS_Store
+Thumbs.db
+*.bundle
+!assets/**/*.bundle
+# Photoshop working files (PNG art may be committed if desired)
+assets/custom/_studio.json
+assets/custom/*.psd
