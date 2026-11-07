@@ -85,6 +85,26 @@
 - `spikes/02_main_menu_poc.py` — แพ็ก POC จาก sheet
 - `studio/app.py` — edit/preview
 
+## Spike 4 — ขยายด้วยคำแปล ThaiW3Setup + วัดขนาด pack
+
+แหล่ง: `ThaiW3Setup/assets/translations.json.gz` · สคริปต์: `spikes/03_pack_size.py` · รายงาน: `export/spike4/SIZE_REPORT.md`
+
+| ชุดที่ pack จริง | glyphs | fonts_en (1 ฟอนต์) | mod รวม |
+| --- | --- | --- | --- |
+| สั้น–กลาง ≤100 ตัว เต็ม PUA | 6,400 | 11.7 MB | **26 MB** |
+| ซับ/บทพูด 80–250 ตัว (ตัวอย่าง) | 400 | 6.3 MB | 21 MB |
+| รอบแก้ (force MENU_POC + scale แยก + size 52 ×3 ฟอนต์) | 6,400 | **58 MB** | **~73 MB** |
+
+ข้อค้นพบ:
+
+- ชีตมี ~**86k** ข้อความไม่ซ้ำ แต่ BMP PUA มีแค่ **6,400** โค้ด → ใส่ครบทั้งเกมในฟอนต์เดียวไม่ได้
+- ถ้า inject ครบ 3 ฟอนต์ใน `fonts_en.redswf` ส่วน glyph ≈ ×3 (~50 MB สำหรับชุด 6,400)
+- ประมาณ shape ดิบทั้งชีต ~**2.5–3 GB / ฟอนต์** (ก่อน zlib) — ไม่สมเหตุผลเทียบ `modThaiLanguage` ของ Setup (~16.5 MB แปลครบแบบตัวอักษร)
+- **Mods / Patch Highlights** ไม่อยู่ในชีต id → หลุดจากชุด 6,400 จนบังคับ `MENU_POC` + `by_text`
+- **ไทยในแถบ Options เล็ก:** `normalize_masks` + scale รวมทำให้ป้ายสั้นหดตามประโยคสูงสุด → ปิด `shared_scale` ใน bulk pack
+- **`3ลาก่อน` / ข้อความทับกัน:** glyph กว้างกว่า SI16 แล้ว `align=center` → x ติดลบยื่นซ้ายทับ `3.` และยื่นขวาทับป้ายข้าง ๆ → bulk pack ใช้ `fit_width` + `align=left`
+- **จอดำ / ค้างเข้าเกม:** ชุด 6,400 × 3 ฟอนต์ (`fonts_en` ~73 MB, mod ~87 MB) ทำให้โหลดค้าง — ถอนออกแล้วกลับเมนู POC 8 ป้าย; ชุดใหญ่เก็บที่ `mods_disabled\modThaiConsole_6400_hang`
+
 ## Fallback ที่ยังไม่ใช้
 
 **Fallback A:** patch texture atlas ของเมนูแบบ `ThaiW3Setup/core/logo.py` — สำรองถ้าคุณภาพ glyph / align ยังไม่พอสำหรับ UI จริง

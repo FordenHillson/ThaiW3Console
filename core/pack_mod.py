@@ -28,6 +28,8 @@ class SentenceEntry:
     string_id: int
     thai: str
     pua_index: int
+    size: int | None = None  # per-sentence render size override
+    scale: float | None = None  # multiplier on pack pixel_scale (1.0 = default)
 
     @property
     def code(self) -> int:
@@ -40,20 +42,53 @@ def build_fonts(
     size: int = PREVIEW_SIZE_BASE,
     weight: str = "Bold",
     y_lift: int = 0,
+    font_index: int | None = None,
+    shared_advance: bool = True,
+    shared_scale: bool = True,
+    fit_width: bool = False,
+    align: str = "center",
+    progress=None,
 ) -> bytes:
-    """Pack glyphs: custom PNG from assets/custom/<id>.png wins over Sarabun."""
+    """Pack glyphs: custom PNG from assets/custom/<id>.png wins over Sarabun.
+
+    ``font_index`` None = every DefineFont3 (menu-safe). Use ``0`` for size probes.
+    Dedupes by PUA code so shared sentence texts render once.
+    Pack uses one metrics-based ``pixel_scale``; override per line via
+    ``SentenceEntry.size`` / ``SentenceEntry.scale``.
+    """
+    from .swf_bitmap_glyph import pixel_scale_for_em
+
     redswf = extract_fonts_en(game)
+    em_h = em_height_for_size(size)
+    base_scale = pixel_scale_for_em(size, weight, em_h)
     images: dict[int, Image.Image] = {}
-    for e in entries:
+    scales: dict[int, float] = {}
+    unique = list({e.code: e for e in entries}.values())
+    total = len(unique)
+    for i, e in enumerate(unique):
         custom = load_custom(e.string_id)
-        img = custom if custom is not None else render_sentence(e.thai, size=size, weight=weight)
+        entry_size = e.size if e.size is not None else size
+        img = custom if custom is not None else render_sentence(e.thai, size=entry_size, weight=weight)
         images[e.code] = rgba_to_mask(img)
+        if e.scale is not None:
+            scales[e.code] = base_scale * float(e.scale)
+        elif e.size is not None and e.size != size:
+            scales[e.code] = pixel_scale_for_em(e.size, weight, em_height_for_size(e.size))
+        else:
+            scales[e.code] = base_scale
+        if progress and (i % 50 == 0 or i + 1 == total):
+            progress(i + 1, total, e.thai[:40])
     return inject_mask_glyphs(
         redswf,
         images,
-        font_index=None,
-        em_height=em_height_for_size(size),
+        font_index=font_index,
+        em_height=em_h,
         y_lift=y_lift,
+        shared_advance=shared_advance,
+        shared_scale=shared_scale,
+        fit_width=fit_width,
+        align=align,
+        scales=scales,
     )
 
 
@@ -87,6 +122,12 @@ def pack_mod(
     y_lift: int = 0,
     language: str = "en",
     loose_strings: bool = True,
+    font_index: int | None = None,
+    shared_advance: bool = True,
+    shared_scale: bool = True,
+    fit_width: bool = False,
+    align: str = "center",
+    progress=None,
 ) -> Path:
     """Write mods/modThaiConsole and return its path.
 
@@ -95,7 +136,19 @@ def pack_mod(
     """
     from .swf_bitmap_glyph import FONT_PATH
 
-    fonts = build_fonts(entries, game=game, size=size, weight=weight, y_lift=y_lift)
+    fonts = build_fonts(
+        entries,
+        game=game,
+        size=size,
+        weight=weight,
+        y_lift=y_lift,
+        font_index=font_index,
+        shared_advance=shared_advance,
+        shared_scale=shared_scale,
+        fit_width=fit_width,
+        align=align,
+        progress=progress,
+    )
     strings = build_w3strings(entries, game=game, language=language)
     files = [
         BundleFile(FONT_PATH, fonts),

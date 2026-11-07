@@ -88,7 +88,7 @@ def _encode_bounds(x_min: int, y_min: int, x_max: int, y_max: int) -> bytes:
 
 
 def normalize_masks(masks: list[Image.Image]) -> list[Image.Image]:
-    """Pad every mask to the same height (centered) so a shared scale keeps size even."""
+    """Pad every mask to the same height (centered). Prefer ``trim_mask`` + per-glyph scale."""
     out = []
     ready = []
     for mask in masks:
@@ -104,6 +104,21 @@ def normalize_masks(masks: list[Image.Image]) -> list[Image.Image]:
         canvas.paste(mask, (0, (max_h - mask.height) // 2))
         out.append(canvas)
     return out
+
+
+def trim_mask(mask: Image.Image, pad: int = 1) -> Image.Image:
+    """Crop to ink bbox so empty padding does not change EM scale."""
+    if mask.mode != "1":
+        mask = mask.convert("L").point(lambda p: 255 if p > 16 else 0, mode="1")
+    bbox = mask.getbbox()
+    if not bbox:
+        return mask
+    left, top, right, bottom = bbox
+    left = max(0, left - pad)
+    top = max(0, top - pad)
+    right = min(mask.width, right + pad)
+    bottom = min(mask.height, bottom + pad)
+    return mask.crop((left, top, right, bottom))
 
 
 # Target glyph height in EM (~Latin capital). Menu TextFields scale by fontSize/EM,
@@ -153,6 +168,7 @@ def mask_to_glyph_shape(
     advance: int | None = None,
     align: str = "center",
     y_lift: int = 0,
+    fit_width: bool = False,
 ) -> tuple[bytes, int, bytes]:
     """Convert an L/'1' mask image to (shape, advance, bounds) in EM units.
 
@@ -160,6 +176,10 @@ def mask_to_glyph_shape(
     visual height and the same metrics box (menu column alignment). Ink is
     centered (or left-aligned) inside that advance slot, and vertically centered
     in the capital band with optional ``y_lift``.
+
+    ``fit_width`` shrinks scale so the ink fits in SI16 advance (≤32767). Needed
+    for UI that mixes ASCII prefixes (``3. ``) or neighbor prompts — otherwise
+    center+overhang paints over ``3.`` (``3ลาก่อน``) and adjacent labels.
     """
     if mask.mode != "1":
         mask = mask.convert("L").point(lambda p: 255 if p > 16 else 0, mode="1")
@@ -169,11 +189,17 @@ def mask_to_glyph_shape(
 
     if scale is None:
         scale = em_height / h_px
+    if fit_width and w_px > 0:
+        scale = min(scale, 32767 / w_px)
     width_em = max(1, int(round(w_px * scale)))
     if advance is None:
         advance = min(32767, width_em)
     else:
         advance = max(1, min(32767, int(advance)))
+    # If advance was shared/clamped smaller than ink, still don't overhang when fitting.
+    if fit_width and width_em > advance:
+        scale *= advance / width_em
+        width_em = advance
     if align == "center":
         x_offset = (advance - width_em) // 2
     elif align == "right":
@@ -426,6 +452,34 @@ def inject_glyphs(redswf: bytes, glyphs: dict[int, tuple[bytes, int, bytes]], fo
     return _edit_fonts(redswf, edit)
 
 
+def add_empty_glyph(redswf: bytes, code: int) -> bytes:
+    """Ensure every DefineFont3 has a zero-width empty glyph for ``code`` (e.g. U+200A).
+
+    Overwrites an existing glyph at that code so a hair-space break never draws ink.
+    """
+
+    def edit(d: bytes) -> bytes | None:
+        f = _read_font3(d)
+        f.put(code, EMPTY_SHAPE, 0, EMPTY_RECT)
+        return _write_font3(f)
+
+    return _edit_fonts(redswf, edit)
+
+
+def pixel_scale_for_em(size: int, weight: str, em_height: int) -> float:
+    """One px→EM scale for a pack render size (font metrics, not per-glyph bbox).
+
+    Using each mask's trimmed height made สระ-tall lines shrink and short lines
+    blow up (ม็อด vs ออก). A single metrics-based scale keeps font size even;
+    per-sentence overrides belong on ``SentenceEntry.size`` / ``.scale``.
+    """
+    from .render import _pil_font
+
+    ascent, descent = _pil_font(weight, size).getmetrics()
+    ref_h = max(1, int(ascent) + abs(int(descent)))
+    return em_height / ref_h
+
+
 def inject_mask_glyphs(
     redswf: bytes,
     items: dict[int, Image.Image],
@@ -433,19 +487,43 @@ def inject_mask_glyphs(
     em_height: int = TARGET_EM_HEIGHT,
     align: str = "center",
     y_lift: int = 0,
+    shared_advance: bool = True,
+    shared_scale: bool = True,
+    fit_width: bool = False,
+    pixel_scale: float | None = None,
+    scales: dict[int, float] | None = None,
 ) -> bytes:
-    """Embed masks as PUA glyphs with shared scale + shared advance (column align)."""
+    """Embed masks as PUA glyphs.
+
+    Prefer ``pixel_scale`` (pack-wide) or ``scales`` (per PUA code). Fall back to
+    per-mask height only when neither is set. ``shared_advance`` = one slot width.
+    """
+    _ = shared_scale
     codes = sorted(items)
-    masks = normalize_masks([
-        rgba_to_mask(items[c]) if items[c].mode != "1" else items[c] for c in codes
-    ])
-    scale = uniform_scale(masks, em_height=em_height)
-    widths = [max(1, int(round(m.width * scale))) for m in masks]
-    slot = min(32767, max(widths, default=1))
+    masks = [
+        trim_mask(rgba_to_mask(items[c]) if items[c].mode != "1" else items[c])
+        for c in codes
+    ]
+    if scales is not None:
+        scale_list = [float(scales[c]) for c in codes]
+    elif pixel_scale is not None:
+        scale_list = [float(pixel_scale)] * len(masks)
+    else:
+        scale_list = [em_height / (m.height or 1) for m in masks]
+    if fit_width:
+        scale_list = [min(s, 32767 / (m.width or 1)) for m, s in zip(masks, scale_list)]
+    widths = [max(1, int(round(m.width * s))) for m, s in zip(masks, scale_list)]
+    slot = min(32767, max(widths, default=1)) if shared_advance else None
     glyphs = {
         code: mask_to_glyph_shape(
-            mask, em_height=em_height, scale=scale, advance=slot, align=align, y_lift=y_lift,
+            mask,
+            em_height=em_height,
+            scale=s,
+            advance=slot if shared_advance else min(32767, w),
+            align=align,
+            y_lift=y_lift,
+            fit_width=fit_width,
         )
-        for code, mask in zip(codes, masks)
+        for code, mask, s, w in zip(codes, masks, scale_list, widths)
     }
     return inject_glyphs(redswf, glyphs, font_index=font_index)
