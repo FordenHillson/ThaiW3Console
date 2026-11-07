@@ -29,9 +29,32 @@ python spikes\01_bitmap_glyph_swf.py --install
 
 :: POC จาก Google Sheets
 python spikes\02_main_menu_poc.py --install
+
+:: วัดขนาด pack จากคำแปล ThaiW3Setup (เต็ม PUA ~6400)
+python spikes\03_pack_size.py
+
+:: ขยายทีละขั้น (หลังชุดใหญ่เคยค้างจอดำ)
+python spikes\04_expand_ladder.py --step 100 --install
+python spikes\04_expand_ladder.py --ok
+python spikes\04_expand_ladder.py --next --install
+
+:: ทีละตัวอักษร (PUA charset) — เมนู POC ขนาดเล็ก ~14 MB
+python spikes\05_char_glyphs_menu.py --install
+
+:: แปลเต็มจาก ThaiW3Setup + ชีตชื่อ/ค้างแปล + ติดตั้ง
+python spikes\06_full_char_pack.py --install
+python spikes\06_full_char_pack.py --install --refresh-extra
 ```
 
 หลังติดตั้ง: ตั้ง **Options → Language → Text Language = English** แล้วดู main menu
+
+## Glyph preview (charset ทั้งม็อด)
+
+```bat
+launch_glyph_preview.bat
+:: หรือ export PNG แล้วออก
+python devtools\preview_glyphs.py --export export\glyph_preview
+```
 
 ## Studio (preview + Photoshop sync)
 
