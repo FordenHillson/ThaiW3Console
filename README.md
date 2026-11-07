@@ -49,6 +49,15 @@ launch_studio.bat
 
 หมายเหตุ: glyph ในเกมเป็น 1-bit ตาม alpha — เงาสีเทาหลายระดับจะกลายเป็นขาวทึบ
 
+## ทดสอบ mod.io (Private)
+
+```bat
+python devtools\pack_modio.py --from-game
+```
+
+ได้ `export\modio\modThaiConsole.zip` — อัปเป็น **Private** บน [mod.io](https://mod.io/g/the-witcher-3) แล้ว Subscribe จากเมนู Mods ในเกม  
+รายละเอียด: `docs/MODIO_PRIVATE.md`
+
 ## โครงสร้าง
 
 - `core/render.py` — ประโยค → PNG (Sarabun)
